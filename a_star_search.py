@@ -6,6 +6,7 @@ import torch
 import numpy as np
 import small_model
 import copy
+import heapq
 
 device = torch.device('mps') if torch.backends.mps.is_available() else torch.device("cpu")
 
@@ -24,9 +25,6 @@ def rand_gen_start_goal(dictionary):
     goal = random.choice(list(all_keys))
     return start, goal
 
-def get_lowest_cost_node(open_list):
-    return open_list[0] if open_list else None
-
 def convert_probability_to_cost(prob):
     if prob <= 0:
         return float('inf')
@@ -35,6 +33,9 @@ def convert_probability_to_cost(prob):
 def get_neighbors(prob_dictionary, key1):
     return [(convert_probability_to_cost(probability), next_node) for next_node, probability in prob_dictionary[key1].items()] if key1 in prob_dictionary else []
 
+def heuristic():
+    """define heuristic later, for now just return 0"""
+    return 0
 
 def a_star_search(dictionary, start, goal):
     # cost eval by -log(probability) where higher probability edges have lower cost and vice versa
@@ -51,14 +52,16 @@ def a_star_search(dictionary, start, goal):
     node = (0, start) # (cost, node) tuple
 
     g_scores = {start: 0}  # Dictionary to store g scores for each node
-    open_list.append(node) 
+    heapq.heappush(open_list, node)
     cur_g = g_scores[start]
 
     while open_list:
         # Get the node with the lowest cost
-        cheapest_node = get_lowest_cost_node(open_list)
-        open_list.remove(cheapest_node)
-        cur_g = g_scores[cheapest_node[1]]
+        cheapest_node = heapq.heappop(open_list)  # pop the cheapest node (f, vector_key) from the open list
+        if cheapest_node[1] in closed_list:
+            continue  # Skip if the cheapest node is already evaluated
+        cur_g = g_scores[cheapest_node[1]] # get the cheapest node's current g score from the g_score dictionary 
+
         if cheapest_node[1] == goal:
             # Reconstruct the path
             total_path = []
@@ -69,33 +72,22 @@ def a_star_search(dictionary, start, goal):
             total_path.reverse()
             print("Path found:", total_path)
             print("Total Steps Taken:", len(total_path))
-            return len(total_path), total_path
+            steps = len(total_path) - 1
+            return steps, total_path
         # get next nodes from cheapest nodes
-        neighbors = get_neighbors(prob_dictionary, cheapest_node[1]) # gives list of sucessor cost and keys from the cheapest node
+        closed_list.add(cheapest_node[1])  # Add the cheapest node to the closed list
+        neighbors = get_neighbors(prob_dictionary, cheapest_node[1]) # gives list of sucessor edge cost and keys from the cheapest node
         for next_node in neighbors:
-            temp_g = cur_g + next_node[0]  # Calculate the temp cur g score for the neighbor
-            h = 0  # Heuristic temp set to 0 for uniform cost search
-            f = temp_g + h
             if next_node[1] in closed_list:
-                continue  # Skip if the neighbor is already evaluated
-            if next_node[1] not in [n[1] for n in open_list]:
-                # If the neighbor is not in the open list, add it
-                open_list.append((f, next_node[1]))
+                continue # Skip if the neighbor vector_key is already evaluated
+            temp_g = cur_g + next_node[0]  # Calculate the temp cur g score for the neighbor
+            if next_node[1] not in g_scores.keys() or temp_g < g_scores[next_node[1]]:
+                # Have I seen this node before or is this new g_score cheaper than the existing g_score? 
+                # if yes update the g_score and add to open list
+                f = temp_g + heuristic()  # Calculate f score for the neighbor
+                heapq.heappush(open_list, (f, next_node[1]))
                 came_from[next_node[1]] = cheapest_node[1]  # Track the path
                 g_scores[next_node[1]] = temp_g  # Update g score for the neighbor
-            else:
-                # If neighbor in open list, check if this path is better
-                existing_node = next(n for n in open_list if n[1] == next_node[1])
-                if temp_g < g_scores[next_node[1]]:
-                    # Update the g score and path if this path is better
-                    g_scores[next_node[1]] = temp_g
-                    came_from[next_node[1]] = cheapest_node[1]
-                    # Update the cost in the open list
-                    open_list.remove(existing_node)
-                    open_list.append((f, next_node[1]))
-
-        closed_list.add(cheapest_node[1])
-        open_list.sort(key=lambda x: x[0]) # sort by cost
     print("no path found")
     return 0, []
 
@@ -151,9 +143,9 @@ def forced_perturbation_search(dictionary, a_star_route):
             dynamic_dictionary[cur_node][optimal_next_node] += 1
             prob_dictionary =f2g.convert_count_to_probability(dynamic_dictionary)
             print(f"[Log] Forced perturbation from {natural_next_node} to {optimal_next_node} at step {i}")
+    steps = len(route) - 1
+    return route, steps, forced_perturbations, cost, dynamic_dictionary
 
-    return route, len(route), forced_perturbations, cost, dynamic_dictionary
-            
 
 if __name__ == "__main__":
     SEED = 42
